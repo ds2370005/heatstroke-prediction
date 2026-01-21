@@ -55,19 +55,16 @@ PREF_MASTER = {
     47: {"name": "沖縄", "jma_id": "471000", "lat": 26.2124, "lon": 127.6809},
 }
 
-# --- アプリ設定 ---
 st.set_page_config(page_title="熱中症予測AIアラート", page_icon="🌡️", layout="centered")
 
 st.title("🌡️ 1週間後の熱中症搬送数予測")
-st.write("気象庁とOpenWeatherMapのデータを用い、AIが1週間後の熱中症リスクを予測します。")
+st.write("AIが最新の気象予報に基づき、1週間後の熱中症リスクを判定します。")
 
-# サイドバーでAPIキー設定
 with st.sidebar:
     st.header("⚙️ 設定")
     api_key = st.text_input("OpenWeatherMap API Key", type="password")
-    st.info("APIキーを入力して「予測開始」を押してください。")
+    st.info("APIキーを入力して予測を開始してください。")
 
-# モデルの読み込み
 @st.cache_resource
 def load_model():
     with open('heatstroke_prediction_model.pkl', 'rb') as f:
@@ -76,7 +73,6 @@ def load_model():
 def get_predictions(owm_key, model):
     target_date = datetime.now() + timedelta(days=7)
     results = []
-    
     progress_bar = st.progress(0)
     total = len(PREF_MASTER)
     
@@ -110,7 +106,7 @@ def get_predictions(owm_key, model):
             
             results.append({
                 "都道府県": info['name'], "予測人数": round(pred, 1),
-                "最高気温": f"{max_t}℃", "湿度": f"{humidity}%", "不快指数": round(di, 1)
+                "最高気温": max_t, "湿度": humidity, "不快指数": round(di, 1)
             })
         except:
             continue
@@ -128,18 +124,47 @@ if api_key:
             if not df_res.empty:
                 st.success(f"✅ {(datetime.now() + timedelta(days=7)).strftime('%Y/%m/%d')} の予測が完了しました。")
                 
-                # ワースト3の表示
+                # --- アップデート：重点警戒アラート ---
+                top_pref = df_res.sort_values("予測人数", ascending=False).iloc[0]
+                st.subheader("📢 最重点警戒エリア")
+                if top_pref['予測人数'] >= 50:
+                    st.error(f"【厳重警戒】{top_pref['都道府県']}で非常に高いリスクが予測されています。")
+                elif top_pref['予測人数'] >= 20:
+                    st.warning(f"【注意】{top_pref['都道府県']}で搬送者が増加する見込みです。")
+                else:
+                    st.info(f"現在、大規模な搬送リスクが予測されている地域はありません。")
+
+                # --- アップデート：メトリックスカード ---
+                st.write("---")
+                st.subheader("🏆 予測ワースト3")
                 top3 = df_res.sort_values("予測人数", ascending=False).head(3)
                 cols = st.columns(3)
                 for i, row in enumerate(top3.itertuples()):
-                    cols[i].metric(label=f"Rank {i+1}: {row.都道府県}", value=f"{row.予測人数} 人")
+                    delta_text = "要警戒" if row.予測人数 > 20 else "平常"
+                    cols[i].metric(
+                        label=f"Rank {i+1}: {row.都道府県}", 
+                        value=f"{row.予測人数} 人",
+                        delta=delta_text,
+                        delta_color="inverse" if row.予測人数 > 20 else "normal"
+                    )
 
-                # 全データテーブル
+                # --- アップデート：装飾付きデータテーブル ---
+                st.write("---")
                 st.subheader("📊 全国予測一覧")
-                st.dataframe(df_res.sort_values("予測人数", ascending=False), use_container_width=True)
+                
+                def color_risk(val):
+                    if isinstance(val, (float, int)):
+                        if val >= 50: return 'background-color: #ffcccc'
+                        if val >= 20: return 'background-color: #fff3cd'
+                    return ''
+
+                st.dataframe(
+                    df_res.sort_values("予測人数", ascending=False).style.applymap(color_risk, subset=['予測人数']),
+                    use_container_width=True
+                )
             else:
                 st.warning("データが取得できませんでした。")
     except FileNotFoundError:
-        st.error("モデルファイル (heatstroke_prediction_model.pkl) が見つかりません。")
+        st.error("モデルファイルが見つかりません。")
 else:
     st.warning("左側のサイドバーにOpenWeatherMapのAPIキーを入力してください。")
