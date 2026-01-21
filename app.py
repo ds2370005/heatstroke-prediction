@@ -3,6 +3,8 @@ import pandas as pd
 import pickle
 import requests
 from datetime import datetime, timedelta
+import folium
+from streamlit_folium import st_folium
 
 # --- 47都道府県マスタデータ ---
 PREF_MASTER = {
@@ -147,7 +149,37 @@ if api_key:
                         delta=delta_text,
                         delta_color="inverse" if row.予測人数 > 20 else "normal"
                     )
-
+                st.write("---")
+                
+                st.subheader("🗺️ 全国リスクマップ")
+                
+                # 日本の中心（付近）を基準に地図を作成
+                m = folium.Map(location=[36.0, 137.1], zoom_start=5)
+                
+                for _, row in df_res.iterrows():
+                    # 都道府県名から座標を取得（PREF_MASTERを逆引き、またはdf_resに座標を含めるよう修正が必要）
+                    # 今回は簡略化のため、PREF_MASTERから直接取得する流れで解説
+                    pref_info = next((v for k, v in PREF_MASTER.items() if v['name'] == row['都道府県']), None)
+                    
+                    if pref_info:
+                        # 予測人数に応じた円の半径（最低5、人数に応じて大きく）
+                        radius = 5 + (row['予測人数'] * 2) 
+                        
+                        # 色の設定
+                        color = 'red' if row['予測人数'] >= 20 else 'orange' if row['予測人数'] >= 5 else 'green'
+                        
+                        folium.CircleMarker(
+                            location=[pref_info['lat'], pref_info['lon']],
+                            radius=radius,
+                            popup=f"{row['都道府県']}: {row['予測人数']}人",
+                            color=color,
+                            fill=True,
+                            fill_color=color,
+                            fill_opacity=0.6
+                        ).add_to(m)
+                
+                # 地図を表示
+                st_folium(m, width=700, height=500)
                 # --- アップデート：装飾付きデータテーブル ---
                 st.write("---")
                 st.subheader("📊 全国予測一覧")
