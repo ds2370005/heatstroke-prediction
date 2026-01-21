@@ -60,12 +60,10 @@ PREF_MASTER = {
 st.set_page_config(page_title="熱中症予測AIアラート", page_icon="🌡️", layout="centered")
 
 st.title("🌡️ 1週間後の熱中症搬送数予測")
-st.write("AIが最新の気象予報に基づき、1週間後の熱中症リスクを判定します。")
 
 with st.sidebar:
     st.header("⚙️ 設定")
     api_key = st.text_input("OpenWeatherMap API Key", type="password")
-    st.info("APIキーを入力して予測を開始してください。")
 
 @st.cache_resource
 def load_model():
@@ -80,12 +78,10 @@ def get_predictions(owm_key, model):
     
     for i, (code, info) in enumerate(PREF_MASTER.items()):
         try:
-            # 1. 湿度取得 (OWM)
             owm_url = f"https://api.openweathermap.org/data/2.5/forecast?lat={info['lat']}&lon={info['lon']}&appid={owm_key}&units=metric"
             owm_res = requests.get(owm_url).json()
             humidity = owm_res['list'][-1]['main']['humidity']
 
-            # 2. 気温取得 (気象庁)
             jma_url = f"https://www.jma.go.jp/bosai/forecast/data/forecast/{info['jma_id']}.json"
             jma_res = requests.get(jma_url).json()
             temps = jma_res[1]['timeSeries'][1]['areas'][0]
@@ -93,10 +89,8 @@ def get_predictions(owm_key, model):
             min_t = float(temps['tempsMin'][-1]) if temps['tempsMin'][-1] != "" else 18.0
             avg_t = (max_t + min_t) / 2
 
-            # 3. DI計算
             di = 0.81 * avg_t + 0.01 * humidity * (0.99 * avg_t - 14.3) + 46.3
 
-            # 4. 予測
             input_df = pd.DataFrame([{
                 '平均気温(℃)': avg_t, '平均湿度(％)': humidity, '最高気温(℃)': max_t, 
                 '最低気温(℃)': min_t, 'DI': di, 'month': target_date.month, 
@@ -104,11 +98,12 @@ def get_predictions(owm_key, model):
             }])
             
             pred = model.predict(input_df)[0]
-            if max_t < 20: pred = 0 # 冬場対策
+            if max_t < 20: pred = 0
             
             results.append({
                 "都道府県": info['name'], "予測人数": round(pred, 1),
-                "最高気温": max_t, "湿度": humidity, "不快指数": round(di, 1)
+                "最高気温": max_t, "湿度": humidity, "不快指数": round(di, 1),
+                "lat": info['lat'], "lon": info['lon'] # 座標を追加
             })
         except:
             continue
@@ -116,7 +111,6 @@ def get_predictions(owm_key, model):
     
     return pd.DataFrame(results)
 
-# メイン処理
 if api_key:
     try:
         model = load_model()
@@ -124,79 +118,11 @@ if api_key:
             df_res = get_predictions(api_key, model)
             
             if not df_res.empty:
-                st.success(f"✅ {(datetime.now() + timedelta(days=7)).strftime('%Y/%m/%d')} の予測が完了しました。")
-                
-                # --- アップデート：重点警戒アラート ---
+                st.success(f"✅ {(datetime.now() + timedelta(days=7)).strftime('%Y/%m/%d')} の予測が完了")
+
+                # --- アラート表示 ---
                 top_pref = df_res.sort_values("予測人数", ascending=False).iloc[0]
-                st.subheader("📢 最重点警戒エリア")
                 if top_pref['予測人数'] >= 50:
-                    st.error(f"【厳重警戒】{top_pref['都道府県']}で非常に高いリスクが予測されています。")
+                    st.error(f"【厳重警戒】{top_pref['都道府県']}")
                 elif top_pref['予測人数'] >= 20:
-                    st.warning(f"【注意】{top_pref['都道府県']}で搬送者が増加する見込みです。")
-                else:
-                    st.info(f"現在、大規模な搬送リスクが予測されている地域はありません。")
-
-                # --- アップデート：メトリックスカード ---
-                st.write("---")
-                st.subheader("🏆 予測ワースト3")
-                top3 = df_res.sort_values("予測人数", ascending=False).head(3)
-                cols = st.columns(3)
-                for i, row in enumerate(top3.itertuples()):
-                    delta_text = "要警戒" if row.予測人数 > 20 else "平常"
-                    cols[i].metric(
-                        label=f"Rank {i+1}: {row.都道府県}", 
-                        value=f"{row.予測人数} 人",
-                        delta=delta_text,
-                        delta_color="inverse" if row.予測人数 > 20 else "normal"
-                    )
-                st.write("---")
-                
-                st.subheader("🗺️ 全国リスクマップ")
-                
-                # 日本の中心（付近）を基準に地図を作成
-                m = folium.Map(location=[36.0, 137.1], zoom_start=5)
-                
-                for _, row in df_res.iterrows():
-                    # 都道府県名から座標を取得（PREF_MASTERを逆引き、またはdf_resに座標を含めるよう修正が必要）
-                    # 今回は簡略化のため、PREF_MASTERから直接取得する流れで解説
-                    pref_info = next((v for k, v in PREF_MASTER.items() if v['name'] == row['都道府県']), None)
-                    
-                    if pref_info:
-                        # 予測人数に応じた円の半径（最低5、人数に応じて大きく）
-                        radius = 5 + (row['予測人数'] * 2) 
-                        
-                        # 色の設定
-                        color = 'red' if row['予測人数'] >= 20 else 'orange' if row['予測人数'] >= 5 else 'green'
-                        
-                        folium.CircleMarker(
-                            location=[pref_info['lat'], pref_info['lon']],
-                            radius=radius,
-                            popup=f"{row['都道府県']}: {row['予測人数']}人",
-                            color=color,
-                            fill=True,
-                            fill_color=color,
-                            fill_opacity=0.6
-                        ).add_to(m)
-                
-                # 地図を表示
-                st_folium(m, width=700, height=500)
-                # --- アップデート：装飾付きデータテーブル ---
-                st.write("---")
-                st.subheader("📊 全国予測一覧")
-                
-                def color_risk(val):
-                    if isinstance(val, (float, int)):
-                        if val >= 50: return 'background-color: #ffcccc'
-                        if val >= 20: return 'background-color: #fff3cd'
-                    return ''
-
-                st.dataframe(
-                    df_res.sort_values("予測人数", ascending=False).style.applymap(color_risk, subset=['予測人数']),
-                    use_container_width=True
-                )
-            else:
-                st.warning("データが取得できませんでした。")
-    except FileNotFoundError:
-        st.error("モデルファイルが見つかりません。")
-else:
-    st.warning("左側のサイドバーにOpenWeatherMapのAPIキーを入力してください。")
+                    st.warning(f"【注意】{top_pref['都道府県']}")
