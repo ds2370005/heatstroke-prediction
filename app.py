@@ -112,14 +112,28 @@ def get_predictions(owm_key, model):
     return pd.DataFrame(results)
 
 if api_key:
+    # --- セッション状態の初期化 ---
+if 'prediction_results' not in st.session_state:
+    st.session_state.prediction_results = None
+
+if api_key:
     try:
         model = load_model()
+        
+        # ボタンが押されたら予測を実行し、結果をセッション状態に保存
         if st.button("🚀 予測を開始する"):
-            df_res = get_predictions(api_key, model)
+            with st.spinner('予測データを計算中...'):
+                results_df = get_predictions(api_key, model)
+                st.session_state.prediction_results = results_df
+
+        # 保存された結果がある場合のみ表示（再実行されても消えない）
+        if st.session_state.prediction_results is not None:
+            df_res = st.session_state.prediction_results
             
             if not df_res.empty:
                 st.success(f"✅ {(datetime.now() + timedelta(days=7)).strftime('%Y/%m/%d')} の予測が完了しました")
 
+                # --- 重点警戒アラート ---
                 top_pref = df_res.sort_values("予測人数", ascending=False).iloc[0]
                 st.subheader("📢 最重点警戒エリア")
                 if top_pref['予測人数'] >= 50:
@@ -129,6 +143,7 @@ if api_key:
                 else:
                     st.info("大規模な搬送リスクが予測されている地域はありません。")
 
+                # --- 地図表示 (Folium) ---
                 st.write("---")
                 st.subheader("🗺️ 全国リスクマップ")
                 m = folium.Map(location=[36.0, 137.1], zoom_start=5)
@@ -141,8 +156,9 @@ if api_key:
                         popup=f"{row['都道府県']}: {row['予測人数']}人",
                         color=color, fill=True, fill_opacity=0.6
                     ).add_to(m)
-                st_folium(m, width=700, height=500)
+                st_folium(m, width=700, height=500, key="heatstroke_map") # keyを追加
 
+                # --- 詳細データテーブル ---
                 st.write("---")
                 st.subheader("📊 全国予測一覧")
                 def color_risk(val):
@@ -157,6 +173,7 @@ if api_key:
                 )
             else:
                 st.warning("データが取得できませんでした。")
+                
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
 else:
