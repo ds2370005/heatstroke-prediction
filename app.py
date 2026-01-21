@@ -110,8 +110,7 @@ def get_predictions(owm_key, model):
         progress_bar.progress((i + 1) / total)
     
     return pd.DataFrame(results)
-
-if api_key:
+    
     # --- セッション状態の初期化 ---
 if 'prediction_results' not in st.session_state:
     st.session_state.prediction_results = None
