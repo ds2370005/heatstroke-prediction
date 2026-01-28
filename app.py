@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from datetime import datetime, timedelta
 import folium
+import pickle
 from streamlit_folium import st_folium
 
 # --- 47都道府県マスタデータ ---
